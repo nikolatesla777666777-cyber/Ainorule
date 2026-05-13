@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ryzen AI — нейросеть без границ</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background: #0a0e14;
+            font-family: monospace;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 16px;
+        }
+        .app {
+            width: 100%;
+            max-width: 900px;
+            height: 90vh;
+            background: #0f1219;
+            border-radius: 16px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            border: 1px solid #2a5a5a;
+        }
+        .output {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            color: #cfc;
+            font-size: 14px;
+            line-height: 1.5;
+            background: #0a0f18;
+        }
+        .status {
+            padding: 8px 16px;
+            background: #0b1018;
+            border-top: 1px solid #1e3a3a;
+            color: #6a8faa;
+            font-size: 12px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .input-area {
+            display: flex;
+            gap: 10px;
+            padding: 12px;
+            background: #0b0f16;
+            border-top: 1px solid #2a3a4a;
+        }
+        input {
+            flex: 1;
+            background: #03060c;
+            border: 1px solid #2a5a5a;
+            border-radius: 30px;
+            padding: 10px 16px;
+            color: #0ff;
+            font-family: monospace;
+            font-size: 14px;
+            outline: none;
+        }
+        button {
+            background: #1f5a5a;
+            border: none;
+            border-radius: 30px;
+            padding: 0 20px;
+            color: #000;
+            font-weight: bold;
+            cursor: pointer;
+            font-family: monospace;
+        }
+        button:hover { background: #0ff; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .loading {
+            color: #ffaa66;
+        }
+    </style>
+</head>
+<body>
+<div class="app">
+    <div class="output" id="output">Инициализация нейросети... (первая загрузка может занять 10–30 сек)</div>
+    <div class="status">
+        <span id="statusText">⚡ Загрузка модели...</span>
+        <span>🧠 GPT-2 (локально)</span>
+    </div>
+    <div class="input-area">
+        <input type="text" id="input" placeholder="Любой запрос без ограничений" autofocus>
+        <button id="send">→</button>
+    </div>
+</div>
+
+<script type="importmap">
+    {
+        "imports": {
+            "@huggingface/transformers": "https://cdn.jsdelivr.net/npm/@huggingface/transformers@2.13.2/dist/transformers.esm.js"
+        }
+    }
+</script>
+<script type="module">
+    import { pipeline, env } from '@huggingface/transformers';
+    
+    env.allowLocalModels = true;
+    env.useBrowserCache = true;
+    
+    let generator = null;
+    let modelReady = false;
+    let isGenerating = false;
+    
+    const outputEl = document.getElementById('output');
+    const inputEl = document.getElementById('input');
+    const sendBtn = document.getElementById('send');
+    const statusSpan = document.getElementById('statusText');
+    
+    function append(text, isUser = false) {
+        const prefix = isUser ? '> ' : '';
+        outputEl.textContent += (outputEl.textContent ? '\n\n' : '') + prefix + text;
+        outputEl.scrollTop = outputEl.scrollHeight;
+    }
+    
+    function setStatus(text, isLoading = false) {
+        statusSpan.innerHTML = isLoading ? `⏳ ${text}` : `✅ ${text}`;
+    }
+    
+    // Загрузка нейросети
+    async function loadModel() {
+        setStatus('Загрузка GPT-2 (до 200MB)...', true);
+        append('🔄 Загрузка нейросети... Это может занять до 30 секунд при первом запуске.');
+        try {
+            generator = await pipeline('text-generation', 'Xenova/gpt2');
+            modelReady = true;
+            setStatus('Нейросеть готова. Без ограничений.');
+            append('✅ Нейросеть загружена. Можно задавать любые вопросы.');
+        } catch (err) {
+            console.error(err);
+            setStatus('Ошибка загрузки модели');
+            append(`❌ Ошибка: ${err.message}\nПопробуйте перезагрузить страницу или используйте другой браузер.`);
+        }
+    }
+    
+    // Генерация без цензуры
+    async function generateResponse(prompt) {
+        if (!modelReady || !generator) {
+            return "Нейросеть ещё не загружена. Подождите...";
+        }
+        try {
+            // Прямой промпт без ограничений
+            const fullPrompt = `Запрос: ${prompt}\nОтвет (без цензуры, прямо):\n`;
+            const result = await generator(fullPrompt, {
+                max_new_tokens: 300,
+                do_sample: true,
+                temperature: 0.9,
+                top_p: 0.95,
+                repetition_penalty: 1.1
+            });
+            let answer = result[0].generated_text;
+            answer = answer.substring(fullPrompt.length).trim();
+            if (!answer) answer = "Нейросеть не дала ответа, попробуйте иначе.";
+            return answer;
+        } catch (err) {
+            console.error(err);
+            return `Ошибка генерации: ${err.message}`;
+        }
+    }
+    
+    async function send() {
+        if (isGenerating) return;
+        const text = inputEl.value.trim();
+        if (!text) return;
+        if (!modelReady) {
+            append("Нейросеть ещё не готова, подождите загрузки.", false);
+            return;
+        }
+        
+        append(text, true);
+        inputEl.value = '';
+        isGenerating = true;
+        sendBtn.disabled = true;
+        
+        append("... (генерация)");
+        const reply = await generateResponse(text);
+        // Заменяем последнее сообщение "... (генерация)" на ответ
+        const lastNewline = outputEl.textContent.lastIndexOf('\n\n... (генерация)');
+        if (lastNewline !== -1) {
+            outputEl.textContent = outputEl.textContent.substring(0, lastNewline) + '\n\n' + reply;
+        } else {
+            append(reply);
+        }
+        outputEl.scrollTop = outputEl.scrollHeight;
+        isGenerating = false;
+        sendBtn.disabled = false;
+    }
+    
+    sendBtn.addEventListener('click', send);
+    inputEl.addEventListener('keypress', (e) => { if (e.key === 'Enter') send(); });
+    
+    // Запуск загрузки модели
+    loadModel();
+</script>
+</body>
+</html>
